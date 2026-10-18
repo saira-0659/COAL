@@ -1,30 +1,42 @@
 [org 0x0100]
 jmp start
 
-clrscr: push es
+                        ;clrscr with REP STOSW
+                        ;[bp+4]=attribute
+clrscr:
+push bp
+mov bp, sp
+sub sp, 2               ; [bp-2] = number of cells
+push es
 push ax
 push cx
 push di
+
+mov word [bp-2], 2000   ; 80 * 25 cells
 mov ax, 0xb800
 mov es, ax
 xor di, di
-mov ax, 0x0720
-mov cx, 2000
+mov ah, [bp+4]          ; attribute
+mov al, ' '             ; blank
+mov cx, [bp-2]
 cld
 rep stosw
+
 pop di
 pop cx
 pop ax
 pop es
-ret
+mov sp, bp
+pop bp
+ret 2
 
 drawrect:               ;border
 push bp
 mov bp, sp
+sub sp, 2               ; [bp-2] = current side row
 push es
 push ax
 push cx
-push dx
 push di
 
 cld
@@ -72,15 +84,17 @@ mov al, 0xBC            ; bottom-right corner
 stosw
 
                         ;left and right sides
-mov dx, [bp+10]
-inc dx
+mov ax, [bp+10]
+inc ax
+mov [bp-2], ax          ; first side row = top + 1
 
 draw_sides_loop:
-cmp dx, [bp+6]
+mov ax, [bp-2]
+cmp ax, [bp+6]
 jge exit
 
-mov ax, 80
-mul dl
+mov al, 80
+mul byte [bp-2]
 add ax, [bp+8]
 shl ax, 1
 mov di, ax
@@ -88,8 +102,8 @@ mov ah, 0x0B
 mov al, 0xBA            ; vertical line left
 stosw
 
-mov ax, 80
-mul dl
+mov al, 80
+mul byte [bp-2]
 add ax, [bp+4]
 shl ax, 1
 mov di, ax
@@ -97,15 +111,15 @@ mov ah, 0x0B
 mov al, 0xBA            ; vertical line right
 stosw
 
-inc dx
+inc word [bp-2]
 jmp draw_sides_loop
 
 exit:
 pop di
-pop dx
 pop cx
 pop ax
 pop es
+mov sp, bp
 pop bp
 ret 8
 
@@ -171,12 +185,12 @@ mov sp, bp
 pop bp
 ret 10
 
-                        ;print ONE line: printline(row, col, str, attr, maxlen)
-                        ;[bp+12]=row [bp+10]=col [bp+8]=str [bp+6]=attr [bp+4]=maxlen
+                        ;printing one line
+                        ;[bp+12]=row [bp+10]=col [bp+8]=string [bp+6]=attribute [bp+4]=maxlen
 printline:
 push bp
 mov bp, sp
-sub sp, 2               ; local [bp-2] = characters remaining
+sub sp, 2               ;[bp-2] = remaining characters
 push es
 push ax
 push si
@@ -217,9 +231,9 @@ mov sp, bp
 pop bp
 ret 10
 
-                        ;print many lines: drawlines(startLine, numLines, startRow)
+                        ;printing multiple lines: drawlines(startLine, numLines, startRow)
                         ;[bp+8]=startLine [bp+6]=numLines [bp+4]=startRow
-                        ;margins: left column + 2 ... right column - 2
+                        ;margins: left column + 2, right column - 2
 drawlines:
 push bp
 mov bp, sp
@@ -239,11 +253,11 @@ cmp word [bp-6], 0
 jle lines_done
 mov ax, [bp-2]
 cmp ax, [numLines]
-jge lines_done          ; no more document lines
+jge lines_done          ; no more lines
 
 mov bx, ax
 shl bx, 1
-mov bx, [lineTable + bx]    ; BX = address of this line
+mov bx, [lineTable + bx]    ; BX = address of current line
 
 push word [bp-4]        ; row
 mov ax, [left]
@@ -271,8 +285,6 @@ pop bp
 ret 6
 
                         ;scroll ONLY the window interior up by N lines
-                        ;scroll_window_up(top, left, bottom, right, n)
-                        ;pass the INTERIOR coordinates so the border is never touched
                         ;[bp+12]=top [bp+10]=left [bp+8]=bottom [bp+6]=right [bp+4]=n
 scroll_window_up:
 push bp
@@ -285,7 +297,6 @@ push ds
 push ax
 push bx
 push cx
-push dx
 push si
 push di
 
@@ -329,7 +340,7 @@ mov ax, 0xb800
 mov ds, ax              ; DS = ES = video segment
 mov es, ax
 
-sc_move:                ; move one row at a time, row stride = 160 bytes
+sc_move:                ; moving one row at a time, row stride = 160 bytes
 cmp word [bp-6], 0
 jle sc_blank
 mov si, [bp-4]
@@ -343,18 +354,165 @@ jmp sc_move
 
 sc_blank:               ; [bp-2] now points at the first vacated row
 mov ax, 0x0720
-mov dx, [bp-10]
 sc_bl:
-cmp dx, 0
+cmp word [bp-10], 0     ; [bp-10] = rows still to blank
 jle sc_done
 mov di, [bp-2]
 mov cx, [bp-8]
 rep stosw
 add word [bp-2], 160
-dec dx
+dec word [bp-10]
 jmp sc_bl
 
 sc_done:
+pop di
+pop si
+pop cx
+pop bx
+pop ax
+pop ds
+pop es
+mov sp, bp
+pop bp
+ret 10
+
+                        ;find_and_highlight(keywordOffset, attr)
+                        ;for every interior row: copy the characters into a row buffer on the stack, find the first letter with REPNE SCASB, compare the rest with REPE CMPSB, and on a match overwrite ONLY the attribute bytes.
+                        ;result stored in [matchCount]
+                        ;[bp+6]=keyword offset  [bp+4]=highlight attribute
+find_and_highlight:
+push bp
+mov bp, sp
+sub sp, 74              ; [bp-2]=match count   [bp-4]=keyword length
+                        ; [bp-6]=current row   [bp-8]=video offset of row start
+                        ; [bp-10]=row width    [bp-74..bp-11]=64 byte row buffer
+push es
+push ds
+push ax
+push bx
+push cx
+push dx
+push si
+push di
+
+cld
+mov word [bp-2], 0      ; matches = 0
+
+mov ax, [right]         ; width = right - left - 1 (interior cells per row)
+sub ax, [left]
+dec ax
+mov [bp-10], ax
+
+mov si, [bp+6]          ; keyword length
+xor cx, cx
+fh_len:
+lodsb
+cmp al, 0
+je fh_lendone
+inc cx
+jmp fh_len
+fh_lendone:
+mov [bp-4], cx
+cmp cx, 0
+jne fh_haskey
+jmp fh_finish           ; empty keyword: nothing to find
+fh_haskey:
+
+mov ax, [top]
+inc ax
+mov [bp-6], ax          ; first interior row
+
+fh_rowloop:
+mov ax, [bp-6]
+cmp ax, [bottom]
+jl fh_rowok
+jmp fh_finish           ; passed the last interior row
+fh_rowok:
+
+                        ;offset of (row, left+1) = (row*80 + left + 1) * 2
+mov al, 80
+mul byte [bp-6]
+add ax, [left]
+inc ax
+shl ax, 1
+mov si, ax
+mov [bp-8], ax
+
+                        ;copy the characters of this row into the stack buffer
+push ss
+pop es                  ; ES = stack segment (row buffer)
+lea di, [bp-74]
+mov ax, 0xb800
+mov ds, ax              ; DS = video segment
+mov cx, [bp-10]
+fh_strip:
+lodsw                   ; AL = character, AH = attribute
+stosb                   ; keep only the character
+loop fh_strip
+xor al, al
+stosb                   ; 0 sentinel stops CMPSB at the end of the row
+push ss
+pop ds                  ; DS back to the data segment (.COM: SS = DS)
+
+                        ;search the row buffer
+lea di, [bp-74]
+mov cx, [bp-10]
+mov bx, [bp+6]
+mov dl, [bx]            ; DL = first letter of the keyword
+fh_scan:
+jcxz fh_nextrow
+mov al, dl
+repne scasb             ; look for the first letter
+jne fh_nextrow          ; not found in the rest of the row
+push cx                 ; DI = character after the first letter
+push di
+lea si, [bx+1]          ; rest of the keyword
+mov cx, [bp-4]
+dec cx                  ; (also leaves ZF=1 for a 1-letter keyword)
+repe cmpsb              ; compare the remaining letters
+pop di
+pop cx
+jne fh_scan             ; mismatch: continue after the first letter
+
+                        ;match: paint only the attribute bytes
+push cx
+push di
+mov ax, di
+dec ax
+lea cx, [bp-74]
+sub ax, cx              ; AX = column index of the match inside the row
+shl ax, 1               ; 2 bytes per cell
+add ax, [bp-8]          ; + video offset of the row start
+inc ax                  ; +1 = attribute byte of the first cell
+mov di, ax
+mov ax, 0xb800
+mov es, ax
+mov al, [bp+4]          ; highlight attribute
+mov cx, [bp-4]          ; one cell per keyword letter
+fh_paint:
+stosb                   ; write the attribute byte
+inc di                  ; skip the next character byte
+loop fh_paint
+push ss
+pop es                  ; ES back to the row buffer
+pop di
+pop cx
+
+inc word [bp-2]         ; match count + 1
+mov ax, [bp-4]          ; skip over the whole match
+dec ax
+add di, ax
+sub cx, ax
+jmp fh_scan
+
+fh_nextrow:
+inc word [bp-6]
+jmp fh_rowloop
+
+fh_finish:
+mov ax, [bp-2]
+mov [matchCount], ax    ; DS = data segment here
+
 pop di
 pop si
 pop dx
@@ -365,9 +523,112 @@ pop ds
 pop es
 mov sp, bp
 pop bp
+ret 4
+
+                        ;printNum(number, row, col, attr, pEndCol)
+                        ;[bp+12]=number [bp+10]=row [bp+8]=col [bp+6]=attr [bp+4]=pEndCol
+printNum:
+push bp
+mov bp, sp
+sub sp, 2               ; [bp-2] = digit count
+push es
+push ax
+push bx
+push cx
+push dx
+push di
+
+cld
+mov word [bp-2], 0
+mov ax, [bp+12]
+mov bx, 10
+pn_div:
+xor dx, dx
+div bx                  ; AX = quotient, DX = remainder (a digit)
+push dx
+inc word [bp-2]
+cmp ax, 0
+jne pn_div
+
+mov al, 80              ; offset = (row*80 + col) * 2
+mul byte [bp+10]
+add ax, [bp+8]
+shl ax, 1
+mov di, ax
+mov ax, 0xb800
+mov es, ax
+mov cx, [bp-2]
+pn_print:
+pop ax                  ; most significant digit first
+add al, '0'
+mov ah, [bp+6]
+stosw
+loop pn_print
+
+mov ax, [bp+8]          ; end column = col + number of digits
+add ax, [bp-2]
+mov bx, [bp+4]
+mov [bx], ax
+
+pop di
+pop dx
+pop cx
+pop bx
+pop ax
+pop es
+mov sp, bp
+pop bp
 ret 10
 
+                        ;print_status(row, count)
+                        ;Total Matches Found: <count> | Viewport Status: ACTIVE
+                        ;[bp+6]=row  [bp+4]=count
+print_status:
+push bp
+mov bp, sp
+sub sp, 2               ; [bp-2] = column after the number
+push ax
+
+push word [bp+6]        ; "Total Matches Found: "
+mov ax, [left]
+push ax
+mov ax, statMsg1
+push ax
+mov ax, 0x70
+push ax
+mov ax, 80
+push ax
+call printline
+
+push word [bp+4]        ; the count
+push word [bp+6]
+mov ax, [left]
+add ax, [stat1Len]
+push ax
+mov ax, 0x70
+push ax
+lea ax, [bp-2]
+push ax                 ; printNum stores the end column here
+call printNum
+
+push word [bp+6]        ; " | Viewport Status: ACTIVE"
+push word [bp-2]
+mov ax, statMsg2
+push ax
+mov ax, 0x70
+push ax
+mov ax, 80
+push ax
+call printline
+
+pop ax
+mov sp, bp
+pop bp
+ret 4
+
 start:
+mov ax, 0x07
+push ax                  ; blank attribute
 call clrscr
 
 push word [top]
@@ -424,6 +685,17 @@ sub ax, 3
 push ax                  ; first vacated row (18)
 call drawlines
 
+mov ax, keyword
+push ax                  ; keyword to search for
+mov ax, 0xCE
+push ax                  ; blinking yellow on red
+call find_and_highlight
+
+mov ax, 23
+push ax                  ; status bar row
+push word [matchCount]
+call print_status
+
 mov ah, 0                ; wait for a key so the screen stays visible
 int 0x16
 
@@ -460,3 +732,9 @@ l19: db 'Fun fact: a blue whale is bigger than any dinosaur known.', 0
 lineTable:  dw l0, l1, l2, l3, l4, l5, l6, l7, l8, l9
             dw l10, l11, l12, l13, l14, l15, l16, l17, l18, l19
 numLines:   dw 20
+
+keyword:    db 'whale', 0
+matchCount: dw 0
+statMsg1:   db 'Total Matches Found: ', 0
+statMsg2:   db ' | Viewport Status: ACTIVE', 0
+stat1Len:   dw statMsg2 - statMsg1 - 1
