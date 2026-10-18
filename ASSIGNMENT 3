@@ -1,7 +1,7 @@
 [org 0x0100]
 jmp start
 
-                        ;clrscr with REP STOSW
+                        ;clrscr(attr) - blank the whole 80x25 screen with REP STOSW
                         ;[bp+4]=attribute
 clrscr:
 push bp
@@ -185,12 +185,12 @@ mov sp, bp
 pop bp
 ret 10
 
-                        ;printing one line
-                        ;[bp+12]=row [bp+10]=col [bp+8]=string [bp+6]=attribute [bp+4]=maxlen
+                        ;print ONE line: printline(row, col, str, attr, maxlen)
+                        ;[bp+12]=row [bp+10]=col [bp+8]=str [bp+6]=attr [bp+4]=maxlen
 printline:
 push bp
 mov bp, sp
-sub sp, 2               ;[bp-2] = remaining characters
+sub sp, 2               ; local [bp-2] = characters remaining
 push es
 push ax
 push si
@@ -231,9 +231,9 @@ mov sp, bp
 pop bp
 ret 10
 
-                        ;printing multiple lines: drawlines(startLine, numLines, startRow)
+                        ;print many lines: drawlines(startLine, numLines, startRow)
                         ;[bp+8]=startLine [bp+6]=numLines [bp+4]=startRow
-                        ;margins: left column + 2, right column - 2
+                        ;margins: left column + 2 ... right column - 2
 drawlines:
 push bp
 mov bp, sp
@@ -253,11 +253,11 @@ cmp word [bp-6], 0
 jle lines_done
 mov ax, [bp-2]
 cmp ax, [numLines]
-jge lines_done          ; no more lines
+jge lines_done          ; no more document lines
 
 mov bx, ax
 shl bx, 1
-mov bx, [lineTable + bx]    ; BX = address of current line
+mov bx, [lineTable + bx]    ; BX = address of this line
 
 push word [bp-4]        ; row
 mov ax, [left]
@@ -285,6 +285,8 @@ pop bp
 ret 6
 
                         ;scroll ONLY the window interior up by N lines
+                        ;scroll_window_up(top, left, bottom, right, n)
+                        ;pass the INTERIOR coordinates so the border is never touched
                         ;[bp+12]=top [bp+10]=left [bp+8]=bottom [bp+6]=right [bp+4]=n
 scroll_window_up:
 push bp
@@ -340,7 +342,7 @@ mov ax, 0xb800
 mov ds, ax              ; DS = ES = video segment
 mov es, ax
 
-sc_move:                ; moving one row at a time, row stride = 160 bytes
+sc_move:                ; move one row at a time, row stride = 160 bytes
 cmp word [bp-6], 0
 jle sc_blank
 mov si, [bp-4]
@@ -377,8 +379,10 @@ pop bp
 ret 10
 
                         ;find_and_highlight(keywordOffset, attr)
-                        ;for every interior row: copy the characters into a row buffer on the stack, find the first letter with REPNE SCASB, compare the rest with REPE CMPSB, and on a match overwrite ONLY the attribute bytes.
-                        ;result stored in [matchCount]
+                        ;for every interior row: copy the characters into a row buffer on the
+                        ;stack, find the first letter with REPNE SCASB, compare the rest with
+                        ;REPE CMPSB, and on a match overwrite ONLY the attribute bytes.
+                        ;result is stored in [matchCount]
                         ;[bp+6]=keyword offset  [bp+4]=highlight attribute
 find_and_highlight:
 push bp
@@ -526,6 +530,9 @@ pop bp
 ret 4
 
                         ;printNum(number, row, col, attr, pEndCol)
+                        ;iterative and stack-based: DIV by 10 pushes the digits (last digit
+                        ;first), then they are popped and printed in the correct order.
+                        ;the column after the last digit is written to the word at pEndCol
                         ;[bp+12]=number [bp+10]=row [bp+8]=col [bp+6]=attr [bp+4]=pEndCol
 printNum:
 push bp
@@ -708,33 +715,34 @@ right:  dw 72
 left:   dw 8
 title:  db ' TEXT VIEWPORT MANAGER ', 0
 
-l0:  db 'The blue whale is the largest animal ever to live on Earth.', 0
-l1:  db 'An adult can grow to about 30 meters, longer than two buses.', 0
-l2:  db 'A big blue whale can weigh as much as 150 tonnes.', 0
-l3:  db 'Its heart is huge and can weigh around 180 kilograms.', 0
-l4:  db 'The tongue of a blue whale can weigh as much as an elephant.', 0
-l5:  db 'Blue whales have no teeth; they filter food with baleen.', 0
-l6:  db 'Their diet is almost entirely made of tiny krill.', 0
-l7:  db 'In feeding season one whale can eat about 4 tonnes a day.', 0
-l8:  db 'A newborn calf is already about 7 meters long.', 0
-l9:  db 'The calf drinks hundreds of litres of milk every day.', 0
-l10: db 'A whale calf can gain around 90 kilograms each day.', 0
-l11: db 'Blue whale calls are among the loudest sounds of any animal.', 0
-l12: db 'The low calls can travel for many kilometers underwater.', 0
-l13: db 'A blue whale usually cruises at about 5 kilometers per hour.', 0
-l14: db 'When it needs to, a whale can sprint at over 30 km per hour.', 0
-l15: db 'The spout of a blue whale can rise about 9 meters high.', 0
-l16: db 'Blue whales can live for 80 to 90 years in the wild.', 0
-l17: db 'They were hunted heavily in the 20th century.', 0
-l18: db 'Today the whale is protected, but it is still endangered.', 0
-l19: db 'Fun fact: a blue whale is bigger than any dinosaur known.', 0
-
+l0:  db 'Itachi Uchiha was a famous ninja of the Hidden Leaf Village.', 0
+l1:  db 'He was born into the Uchiha clan, elder brother of Sasuke.', 0
+l2:  db 'Itachi finished the Academy at age 7, a true child prodigy.', 0
+l3:  db 'He awakened his Sharingan at 8 and became a Chunin at 10.', 0
+l4:  db 'By the age of 13 Itachi was already an ANBU captain.', 0
+l5:  db 'He later unlocked the Mangekyo Sharingan, a powerful upgrade.', 0
+l6:  db 'Itachi used Tsukuyomi, a genjutsu that bends time and space.', 0
+l7:  db 'He also mastered Amaterasu, black flames that never go out.', 0
+l8:  db 'His Susanoo gave him the Totsuka Sword and the Yata Mirror.', 0
+l9:  db 'Crows were his signature, and he often used them in battle.', 0
+l10: db 'Itachi was ordered to end the Uchiha clan to stop a coup.', 0
+l11: db 'He spared only his little brother Sasuke, whom he loved.', 0
+l12: db 'Itachi then joined the Akatsuki, partnered with Kisame.', 0
+l13: db 'Behind his cold mask he secretly protected the Leaf Village.', 0
+l14: db 'A serious illness weakened Itachi for much of his life.', 0
+l15: db 'His last fight against Sasuke ended with his own death.', 0
+l16: db 'In the Fourth Shinobi War Itachi returned through Edo Tensei.', 0
+l17: db 'He used Izanami on Kabuto to end the Edo Tensei jutsu.', 0
+l18: db 'Dango was one of his favorite foods.', 0
+l19: db 'Fans see Itachi as one of the most tragic heroes in anime.', 0
+ 
 lineTable:  dw l0, l1, l2, l3, l4, l5, l6, l7, l8, l9
             dw l10, l11, l12, l13, l14, l15, l16, l17, l18, l19
 numLines:   dw 20
-
-keyword:    db 'whale', 0
+ 
+keyword:    db 'Itachi', 0
 matchCount: dw 0
 statMsg1:   db 'Total Matches Found: ', 0
 statMsg2:   db ' | Viewport Status: ACTIVE', 0
 stat1Len:   dw statMsg2 - statMsg1 - 1
+ 
