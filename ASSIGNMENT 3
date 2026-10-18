@@ -171,6 +171,105 @@ mov sp, bp
 pop bp
 ret 10
 
+                        ;print ONE line: printline(row, col, str, attr, maxlen)
+                        ;[bp+12]=row [bp+10]=col [bp+8]=str [bp+6]=attr [bp+4]=maxlen
+printline:
+push bp
+mov bp, sp
+sub sp, 2               ; local [bp-2] = characters remaining
+push es
+push ax
+push si
+push di
+
+cld
+mov ax, [bp+4]
+mov [bp-2], ax          ; remaining = maxlen
+
+                        ;video offset = (row*80 + col) * 2
+mov al, 80
+mul byte [bp+12]
+add ax, [bp+10]
+shl ax, 1
+mov di, ax
+
+mov ax, 0xb800
+mov es, ax
+mov si, [bp+8]
+mov ah, [bp+6]          ; AH = attribute used by every STOSW
+
+next_char:
+cmp word [bp-2], 0
+je line_done
+lodsb                   ; AL = next character
+cmp al, 0
+je line_done
+stosw                   ; AL = char, AH = attribute
+dec word [bp-2]
+jmp next_char
+
+line_done:
+pop di
+pop si
+pop ax
+pop es
+mov sp, bp
+pop bp
+ret 10
+
+                        ;print many lines: drawlines(startLine, numLines, startRow)
+                        ;[bp+8]=startLine [bp+6]=numLines [bp+4]=startRow
+                        ;margins: left column + 2 ... right column - 2
+drawlines:
+push bp
+mov bp, sp
+sub sp, 6               ; [bp-2]=line index [bp-4]=row [bp-6]=lines remaining
+push ax
+push bx
+
+mov ax, [bp+8]
+mov [bp-2], ax
+mov ax, [bp+4]
+mov [bp-4], ax
+mov ax, [bp+6]
+mov [bp-6], ax
+
+lines_loop:
+cmp word [bp-6], 0
+jle lines_done
+mov ax, [bp-2]
+cmp ax, [numLines]
+jge lines_done          ; no more document lines
+
+mov bx, ax
+shl bx, 1
+mov bx, [lineTable + bx]    ; BX = address of this line
+
+push word [bp-4]        ; row
+mov ax, [left]
+add ax, 2
+push ax                 ; column = left + 2
+push bx                 ; string
+mov ax, 0x07
+push ax                 ; normal text attribute
+mov ax, [right]
+sub ax, [left]
+sub ax, 3
+push ax                 ; max chars = (right-2) - (left+2) + 1
+call printline
+
+inc word [bp-2]
+inc word [bp-4]
+dec word [bp-6]
+jmp lines_loop
+
+lines_done:
+pop bx
+pop ax
+mov sp, bp
+pop bp
+ret 6
+
 start:
 call clrscr
 
@@ -189,6 +288,17 @@ mov ax, 0x1E             ; yellow on blue
 push ax
 call drawtitle
 
+xor ax, ax
+push ax                  ; start at document line 0
+mov ax, [bottom]
+sub ax, [top]
+dec ax
+push ax                  ; number of interior rows (17)
+mov ax, [top]
+inc ax
+push ax                  ; first interior row (4)
+call drawlines
+
 mov ah, 0                ; wait for a key so the screen stays visible
 int 0x16
 
@@ -200,3 +310,28 @@ bottom: dw 21
 right:  dw 72
 left:   dw 8
 title:  db ' TEXT VIEWPORT MANAGER ', 0
+
+l0:  db 'The 8088 text mode keeps every screen cell in video memory.', 0
+l1:  db 'Each cell uses two bytes: one ASCII code and one attribute.', 0
+l2:  db 'The video segment starts at 0xB800 and holds 80 by 25 cells.', 0
+l3:  db 'A viewport is a bounded window drawn inside that video area.', 0
+l4:  db 'Scrolling the viewport must never touch the border cells.', 0
+l5:  db 'Only the lines inside the window move upward by N rows.', 0
+l6:  db 'The vacated bottom lines are filled with blank video cells.', 0
+l7:  db 'String instructions keep this kind of work compact and fast.', 0
+l8:  db 'MOVSW copies one row of video cells to the row above it.', 0
+l9:  db 'STOSW blanks the freed rows using a normal text attribute.', 0
+l10: db 'The highlighter reads the characters from video memory.', 0
+l11: db 'It strips the attributes into a row buffer on the stack.', 0
+l12: db 'REPNE SCASB finds the first letter of the search keyword.', 0
+l13: db 'REPE CMPSB then compares the remaining letters of the word.', 0
+l14: db 'Every match changes only the attribute byte in video memory.', 0
+l15: db 'The ASCII characters of the match are never modified.', 0
+l16: db 'A status bar counts all the matches that are visible.', 0
+l17: db 'Because video memory is shared, drawing is immediate.', 0
+l18: db 'Scrolling reveals more lines of the document buffer.', 0
+l19: db 'End of document: video memory is fully managed by the viewer.', 0
+
+lineTable:  dw l0, l1, l2, l3, l4, l5, l6, l7, l8, l9
+            dw l10, l11, l12, l13, l14, l15, l16, l17, l18, l19
+numLines:   dw 20
