@@ -29,13 +29,13 @@ part 3: Bounded Sub-Window Scrolling (Window Scroll Up)
   - Move lines using MOVSW with row-stride offset calculations for each individual line, and
     blank out the vacated bottom line(s) of the window using STOSW.
 
-part 4:
+part 4: In-Memory Substring Search & Highlighting Engine
   - Implement a subroutine that receives the search substring offset and target highlight attribute via the stack.
   - Traverse display memory within active viewport using string instructions (REPE CMPSB / SCASB) to match consecutive characters.
   - For every match found on the screen, overwrite its corresponding video attribute bytes to highlight the keyword without
     modifying the underlying ASCII characters.
 
-part 5:
+part 5: Statistics Status Bar (Bottom Row)
   - On row 23, display a summary status bar formatted as:
     Total Matches Found: [Count] | Viewport Status: ACTIVE
   - The integer count must be printed using a dedicated recursive or iterative stack-based printNum subroutine.
