@@ -1,1 +1,209 @@
+[org 0x0100]
 
+	MOV BP, obs
+	MOV BYTE [loopCount], 3
+
+OuterLoop:
+	MOV DI, weights
+
+
+	MOV AX, [BP]
+	MOV CL, 10
+	SHR AX, CL
+	SUB AX, 20
+	MOV [X1], AX
+
+	
+	MOV AX, [BP]
+	MOV CL, 5
+	SHR AX, CL
+	AND AX, 0x001F
+	SUB AX, 8
+	MOV [X2], AX
+
+	
+	MOV AX, [BP]
+	AND AX, 0x001F
+	SUB AX, 16
+	MOV [X3], AX
+
+	MOV CH, 1
+
+ComputeScores:
+
+	MOV AX, [X1]
+	MOV DL, [DI]
+	TEST DL, 0x80
+	JZ W1
+	MOV DH, 0xFF
+	JMP CALCX1
+W1:
+	MOV DH, 0x00
+CALCX1:
+	MOV BYTE [tempSign], 0
+	CMP AX, 0
+	JGE POS1
+	NEG AX
+	XOR BYTE [tempSign], 1
+POS1:
+	CMP DX, 0
+	JGE MUL1
+	NEG DX
+	XOR BYTE [tempSign], 1
+MUL1:
+	MUL DX
+	CMP BYTE [tempSign], 1
+	JNE ADDX1
+	NEG AX
+ADDX1:
+	MOV SI, AX
+	INC DI
+
+	
+	MOV AX, [X2]
+	MOV DL, [DI]
+	TEST DL, 0x80
+	JZ W2
+	MOV DH, 0xFF
+	JMP CALCX2
+W2:
+	MOV DH, 0x00
+CALCX2:
+	MOV BYTE [tempSign], 0
+	CMP AX, 0
+	JGE POS2
+	NEG AX
+	XOR BYTE [tempSign], 1
+POS2:
+	CMP DX, 0
+	JGE MUL2
+	NEG DX
+	XOR BYTE [tempSign], 1
+MUL2:
+	MUL DX
+	CMP BYTE [tempSign], 1
+	JNE ADDX2
+	NEG AX
+ADDX2:
+	ADD SI, AX
+	INC DI
+
+	MOV AX, [X3]
+	MOV DL, [DI]
+	TEST DL, 0x80
+	JZ W3
+	MOV DH, 0xFF
+	JMP CALCX3
+W3:
+	MOV DH, 0x00
+CALCX3:
+	MOV BYTE [tempSign], 0
+	CMP AX, 0
+	JGE POS3
+	NEG AX
+	XOR BYTE [tempSign], 1
+POS3:
+	CMP DX, 0
+	JGE MUL3
+	NEG DX
+	XOR BYTE [tempSign], 1
+MUL3:
+	MUL DX
+	CMP BYTE [tempSign], 1
+	JNE ADDX3
+	NEG AX
+ADDX3:
+	ADD SI, AX
+	INC DI
+
+	MOV AL, [DI]
+	TEST AL, 0x80
+	JZ BIAS
+	MOV AH, 0xFF
+	JMP ADDBIAS
+BIAS:
+	MOV AH, 0x00
+ADDBIAS:
+	ADD SI, AX
+	INC DI
+
+	CMP CH, 1
+	JE StoreNormal
+	
+	CMP CH, 2
+	JE StoreSuspicious
+	
+	CMP CH, 3
+	JE StoreAttack
+
+StoreNormal:
+	MOV [normScore], SI
+	JMP NextClass
+
+StoreSuspicious:
+	MOV [susScore], SI
+	JMP NextClass
+
+StoreAttack:
+	MOV [atkScore], SI
+	JMP Store
+
+NextClass:
+	INC CH
+	JMP ComputeScores
+
+Store:
+	MOV AX, [normScore]
+	MOV BX, [susScore]
+	MOV DX, [atkScore]
+
+	MOV SI, [outPtr]
+
+	CMP AX, BX
+	JL L2
+	
+	CMP AX, DX
+	JL L3
+
+	JMP L1
+
+L2: 
+	CMP BX, DX
+	JL L3
+	
+	MOV BYTE [SI], 2
+	JMP EndPrediction
+
+L1: 
+	MOV BYTE [SI], 1
+	JMP EndPrediction
+
+L3: 
+	MOV BYTE [SI], 3
+
+EndPrediction:
+	INC WORD [outPtr]
+	ADD BP, 2
+	DEC BYTE [loopCount]
+	JNZ OuterLoop
+
+	MOV AX, 0x4C00
+	INT 0x21
+
+obs:       dw 0x6552, 0x2C91, 0x7FA3
+numObs:    db 3
+weights:   db 2, -3, -1, 10
+           db 1,  4,  2,  0
+           db -2, 5,  4, -5
+
+X1:        dw 0
+X2:        dw 0
+X3:        dw 0
+tempSign:  db 0
+loopCount: db 0
+outPtr:    dw predFlag
+
+normScore: dw 0000H
+susScore:  dw 0000H
+atkScore:  dw 0000H
+predFlag:  db 0, 0, 0
