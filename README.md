@@ -14,14 +14,25 @@ This repository contains a 16-bit real-mode x86 (8088) assembly programs, writte
 
 Draws a bounded text viewer directly in video memory (segment `0xB800`).
 
-part 1: initial viewport window
+part 1: Initial Viewport Window
   - Clears the 80x25 screen with `REP STOSW`.
   - Draws a double-line border window from row 3 to row 21 and column 8 to column 72.
   - Prints a centered title banner with attribute `0x1E`.
+    
+part 2: Multi-line Text Buffer Streaming
+  - Load and display a paragraph stored in memory inside the window boundaries.
+  - Use string primitives (LODSB/STOSW) to stream characters into the video segment.
+    
+part 3: Bounded Sub-Window Scrolling (Window Scroll Up)
+  - Implement a subroutine scroll_window_up that receives the window coordinates.
+  - Shift text inside the window upward by N lines without altering or corrupting window borders or external screen areas.
+  - Move lines using MOVSW with row-stride offset calculations for each individual line, and
+    blank out the vacated bottom line(s) of the window using STOSW.
+    
 ## Files
 
-| File | Description |
-
+|     File     |          Description          |
+| 25L-0659.asm | Q2: complete viewport manager |
 
 ## Tools Used
 
