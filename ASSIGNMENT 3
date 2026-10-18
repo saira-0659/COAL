@@ -270,6 +270,103 @@ mov sp, bp
 pop bp
 ret 6
 
+                        ;scroll ONLY the window interior up by N lines
+                        ;scroll_window_up(top, left, bottom, right, n)
+                        ;pass the INTERIOR coordinates so the border is never touched
+                        ;[bp+12]=top [bp+10]=left [bp+8]=bottom [bp+6]=right [bp+4]=n
+scroll_window_up:
+push bp
+mov bp, sp
+sub sp, 10              ; [bp-2]=dest row offset  [bp-4]=source row offset
+                        ; [bp-6]=lines to move    [bp-8]=width in words
+                        ; [bp-10]=n (limited to the window height)
+push es
+push ds
+push ax
+push bx
+push cx
+push dx
+push si
+push di
+
+cld
+
+mov ax, [bp+6]          ; width = right - left + 1
+sub ax, [bp+10]
+inc ax
+mov [bp-8], ax
+
+mov ax, [bp+8]          ; height = bottom - top + 1
+sub ax, [bp+12]
+inc ax
+mov bx, [bp+4]          ; n
+cmp bx, ax
+jle sc_nok
+mov bx, ax              ; n cannot be bigger than the window height
+sc_nok:
+mov [bp-10], bx
+sub ax, bx              ; lines to move = height - n
+mov [bp-6], ax
+
+                        ;destination = (top, left)
+mov al, 80
+mul byte [bp+12]
+add ax, [bp+10]
+shl ax, 1
+mov [bp-2], ax
+
+                        ;source = (top + n, left)
+mov ax, [bp+12]
+add ax, [bp-10]
+mov bx, ax              ; BL = top + n
+mov al, 80
+mul bl
+add ax, [bp+10]
+shl ax, 1
+mov [bp-4], ax
+
+mov ax, 0xb800
+mov ds, ax              ; DS = ES = video segment
+mov es, ax
+
+sc_move:                ; move one row at a time, row stride = 160 bytes
+cmp word [bp-6], 0
+jle sc_blank
+mov si, [bp-4]
+mov di, [bp-2]
+mov cx, [bp-8]
+rep movsw
+add word [bp-4], 160
+add word [bp-2], 160
+dec word [bp-6]
+jmp sc_move
+
+sc_blank:               ; [bp-2] now points at the first vacated row
+mov ax, 0x0720
+mov dx, [bp-10]
+sc_bl:
+cmp dx, 0
+jle sc_done
+mov di, [bp-2]
+mov cx, [bp-8]
+rep stosw
+add word [bp-2], 160
+dec dx
+jmp sc_bl
+
+sc_done:
+pop di
+pop si
+pop dx
+pop cx
+pop bx
+pop ax
+pop ds
+pop es
+mov sp, bp
+pop bp
+ret 10
+
 start:
 call clrscr
 
@@ -299,6 +396,34 @@ inc ax
 push ax                  ; first interior row (4)
 call drawlines
 
+mov ah, 0                ; wait for a key, then scroll
+int 0x16
+
+mov ax, [top]
+inc ax
+push ax                  ; interior top    (4)
+mov ax, [left]
+inc ax
+push ax                  ; interior left   (9)
+mov ax, [bottom]
+dec ax
+push ax                  ; interior bottom (20)
+mov ax, [right]
+dec ax
+push ax                  ; interior right  (71)
+mov ax, 3
+push ax                  ; scroll up by 3 lines
+call scroll_window_up
+
+mov ax, 17
+push ax                  ; next document line (17)
+mov ax, 3
+push ax                  ; 3 lines
+mov ax, [bottom]
+sub ax, 3
+push ax                  ; first vacated row (18)
+call drawlines
+
 mov ah, 0                ; wait for a key so the screen stays visible
 int 0x16
 
@@ -311,26 +436,26 @@ right:  dw 72
 left:   dw 8
 title:  db ' TEXT VIEWPORT MANAGER ', 0
 
-l0:  db 'The 8088 text mode keeps every screen cell in video memory.', 0
-l1:  db 'Each cell uses two bytes: one ASCII code and one attribute.', 0
-l2:  db 'The video segment starts at 0xB800 and holds 80 by 25 cells.', 0
-l3:  db 'A viewport is a bounded window drawn inside that video area.', 0
-l4:  db 'Scrolling the viewport must never touch the border cells.', 0
-l5:  db 'Only the lines inside the window move upward by N rows.', 0
-l6:  db 'The vacated bottom lines are filled with blank video cells.', 0
-l7:  db 'String instructions keep this kind of work compact and fast.', 0
-l8:  db 'MOVSW copies one row of video cells to the row above it.', 0
-l9:  db 'STOSW blanks the freed rows using a normal text attribute.', 0
-l10: db 'The highlighter reads the characters from video memory.', 0
-l11: db 'It strips the attributes into a row buffer on the stack.', 0
-l12: db 'REPNE SCASB finds the first letter of the search keyword.', 0
-l13: db 'REPE CMPSB then compares the remaining letters of the word.', 0
-l14: db 'Every match changes only the attribute byte in video memory.', 0
-l15: db 'The ASCII characters of the match are never modified.', 0
-l16: db 'A status bar counts all the matches that are visible.', 0
-l17: db 'Because video memory is shared, drawing is immediate.', 0
-l18: db 'Scrolling reveals more lines of the document buffer.', 0
-l19: db 'End of document: video memory is fully managed by the viewer.', 0
+l0:  db 'The blue whale is the largest animal ever to live on Earth.', 0
+l1:  db 'An adult can grow to about 30 meters, longer than two buses.', 0
+l2:  db 'A big blue whale can weigh as much as 150 tonnes.', 0
+l3:  db 'Its heart is huge and can weigh around 180 kilograms.', 0
+l4:  db 'The tongue of a blue whale can weigh as much as an elephant.', 0
+l5:  db 'Blue whales have no teeth; they filter food with baleen.', 0
+l6:  db 'Their diet is almost entirely made of tiny krill.', 0
+l7:  db 'In feeding season one whale can eat about 4 tonnes a day.', 0
+l8:  db 'A newborn calf is already about 7 meters long.', 0
+l9:  db 'The calf drinks hundreds of litres of milk every day.', 0
+l10: db 'A whale calf can gain around 90 kilograms each day.', 0
+l11: db 'Blue whale calls are among the loudest sounds of any animal.', 0
+l12: db 'The low calls can travel for many kilometers underwater.', 0
+l13: db 'A blue whale usually cruises at about 5 kilometers per hour.', 0
+l14: db 'When it needs to, a whale can sprint at over 30 km per hour.', 0
+l15: db 'The spout of a blue whale can rise about 9 meters high.', 0
+l16: db 'Blue whales can live for 80 to 90 years in the wild.', 0
+l17: db 'They were hunted heavily in the 20th century.', 0
+l18: db 'Today the whale is protected, but it is still endangered.', 0
+l19: db 'Fun fact: a blue whale is bigger than any dinosaur known.', 0
 
 lineTable:  dw l0, l1, l2, l3, l4, l5, l6, l7, l8, l9
             dw l10, l11, l12, l13, l14, l15, l16, l17, l18, l19
